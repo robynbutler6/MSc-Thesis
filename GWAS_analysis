@@ -1,0 +1,330 @@
+library(qqman)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(BiocManager)
+library(EnhancedVolcano)
+library('DESeq2')
+library(ggrepel)
+library(ggpubr)
+
+fig_label <- function(text, region="figure", pos="topleft", cex=NULL, ...) {
+  region <- match.arg(region, c("figure", "plot", "device"))
+  pos <- match.arg(pos, c("topleft", "top", "topright",
+                          "left", "center", "right",
+                          "bottomleft", "bottom", "bottomright"))
+  if(region %in% c("figure", "device")) {
+    ds <- dev.size("in")
+    # xy coordinates of device corners in user coordinates
+    x <- grconvertX(c(0, ds[1]), from="in", to="user")
+    y <- grconvertY(c(0, ds[2]), from="in", to="user")
+    # fragment of the device we use to plot
+    if(region == "figure") {
+      # account for the fragment of the device that
+      # the figure is using
+      fig <- par("fig")
+      dx <- (x[2] - x[1])
+      dy <- (y[2] - y[1])
+      x <- x[1] + dx * fig[1:2]
+      y <- y[1] + dy * fig[3:4]
+    }
+  }
+  # much simpler if in plotting region
+  if(region == "plot") {
+    u <- par("usr")
+    x <- u[1:2]
+    y <- u[3:4]
+  }
+  sw <- strwidth(text, cex=cex) * 60/100
+  sh <- strheight(text, cex=cex) * 60/100
+  x1 <- switch(pos,
+               topleft     =x[1] + sw,
+               left        =x[1] + sw,
+               bottomleft  =x[1] + sw,
+               top         =(x[1] + x[2])/2,
+               center      =(x[1] + x[2])/2,
+               bottom      =(x[1] + x[2])/2,
+               topright    =x[2] - sw,
+               right       =x[2] - sw,
+               bottomright =x[2] - sw)
+  y1 <- switch(pos,
+               topleft     =y[2] - sh,
+               top         =y[2] - sh,
+               topright    =y[2] - sh,
+               left        =(y[1] + y[2])/2,
+               center      =(y[1] + y[2])/2,
+               right       =(y[1] + y[2])/2,
+               bottomleft  =y[1] + sh,
+               bottom      =y[1] + sh,
+               bottomright =y[1] + sh)
+  old.par <- par(xpd=NA)
+  on.exit(par(old.par))
+  text(x1, y1, text, cex=cex, font=2, ...)
+  return(invisible(c(x,y)))
+}
+
+#FaSTLMM SNP GWAS with covariate
+#load the GWAS results of the snps from FASTLMM and create manahttan plot
+snp_gwas_result <- read.table("FAST_GAS_COV", header = TRUE)
+nrow(snp_gwas_result)
+#manhattan plot. red line = genome-wide significance threshold (usually 5e10-8). blue line = suggestive threshold.
+plot_snp <- manhattan(snp_gwas_result, chr = "Chromosome", bp = "Position", snp = "SNP", 
+          p = "Pvalue", xlab ="Genome Position", ylim = c(0, 8), xlim = c(0, 1800000), 
+          annotatePval = .005, col = c("black"), cex.lab = 0.8, cex.axis = 0.8)
+plot_snp
+tiff("snp_manhattan_cov", width = 3000, height = 3000, res = 400) 
+manhattan(snp_gwas_result, chr = "Chromosome", bp = "Position", snp = "SNP", p = "Pvalue", xlab ="Genome Position", ylim = c(0, 8), xlim = c(0, 1800000), annotatePval = .005, col = c("black"), cex.lab = 0.8, cex.axis = 0.8) 
+dev.off()
+
+#qqplot with snp data
+{pdf("snp_combined", width = 8, height = 4)
+par(mfrow=c(1,2))
+qq(snp_gwas_result$Pvalue, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch =1, bty = "n")
+fig_label("a")
+manhattan(snp_gwas_result, chr = "Chromosome", bp = "Position", snp = "SNP", p = "Pvalue", xlab ="Genome Position", ylim = c(0, 8), xlim = c(0, 1800000), annotatePval = .005, col = c("black"), cex.lab = 0.8, cex.axis = 0.8) 
+fig_label("b")
+dev.off()}
+
+#alternative to manhattan plot
+snp_gwas_result$log10_pvalue <- -log10(snp_gwas_result$Pvalue)
+ggplot(data = snp_gwas_result, aes(x = OddsRatio, y = log10_pvalue)) + geom_point(shape = 1)
+
+#FaSTLMM SNP GWAS without covariate
+snp_no_covariate <- read.table("FAST_GAS", header = TRUE)
+nrow(snp_no_covariate)
+
+#qqplot with SNP gwas without covariate
+tiff("qq_snp", width = 3000, height = 3000, res = 400) 
+qq(snp_no_covariate$Pvalue, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch = 1)
+dev.off()
+
+#load GWAS results of gene presence absence FASTLMM with covariate
+gene_gwas_result <- read.table("FAST_PRESENCE_ABSENCE_COV", header = TRUE)
+nrow(gene_gwas_result)
+gene_gwas_result$log2FoldChange <- log2(gene_gwas_result$OddsRatio)
+gene_gwas_result$log10_pvalue <- -log10(gene_gwas_result$Pvalue)
+
+#create volcano plot for gene presence absence FASTLMM covariate GWAS results -log10 p value and log2foldchange of odds ratio
+fastlmm_gene <- ggplot(data = gene_gwas_result, aes(x=log2FoldChange, y=log10_pvalue)) + ylab(expression(-Log[10]~(~italic(p)~value))) + xlab(expression(Log[2](odds~ratio))) + geom_point(shape = 1) + geom_hline(yintercept = 3.961895, linetype = "dashed", colour = "red")
+fastlmm_gene
+
+par(mfrow=c(1,2))
+#volcano plot with base R, qq plot and save
+{pdf("gene_combined", width = 8, height = 4)
+par(mfrow=c(1,2))
+qq(gene_gwas_result$Pvalue, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch =1, bty = "n", ylim = c(0, 3))
+fig_label("a")
+plot(gene_gwas_result$log2FoldChange, gene_gwas_result$log10_pvalue, xlab = expression(Log[2](odds~ratio)), ylab = expression(-Log[10]~(~italic(p)~value)), las = 1, xlim = c(-0.3, 0.3), ylim = c(0, 4), bty = "n", col = ifelse(gene_gwas_result$OddsRatio>1, "red", viridis::viridis(2)[1]), pch = 20)
+abline(h = 3.961895, col = "blue", lty = 4)
+legend("topright", legend = c("OR > 1", "OR < 1"), fill = c("red", viridis::viridis(2)[1]), bty = "n")
+fig_label("b")
+  dev.off()}
+
+#statistical threshold
+-log10(0.05/458)
+#qqplot with gene presence absence FASTLMM 
+
+#load FASTLMM gene presence absence no covariate 
+gene_gwas_no_cov <- read.table("FAST_PRESENCE_ABSENCE", header = TRUE)
+gene_gwas_no_cov$log2FoldChange <- log2(gene_gwas_no_cov$OddsRatio)
+gene_gwas_no_cov$log10_pvalue <- -log10(gene_gwas_no_cov$Pvalue)
+
+#create volcanoe of FASTLMM gene presence absence no covariate 
+#statistical threshold
+-log10(0.05/458)
+(0.05/458)
+# = 3.961895
+#qq plot
+
+#load scoary results 
+scoary_results <- read.csv("Scoary_output.csv", header = TRUE, na.strings =c(""))
+#create volcano plot for gene presence absence Scoary results -log10 p value and log2fold change of odds ratio
+scoary_results$log2FoldChange <- log2(scoary_results$Odds_ratio)
+scoary_results$log10_pvalue <- -log10(scoary_results$Naive_p)
+
+#volcano and qq plot and save
+{pdf("gene_scoary", width = 8, height = 4)
+par(mfrow=c(1,2))
+qq(scoary_results$Naive_p, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch = 1, bty = "n")
+fig_label("a")
+plot(scoary_results$log2FoldChange, scoary_results$log10_pvalue, xlab = expression(Log[2](odds~ratio)), ylab = expression(-Log[10]~(~italic(p)~value)), las = 1, xlim = c(-4,6), ylim = c(0, 25), bty = "n", col = ifelse(scoary_results$Odds_ratio>1, "red", viridis::viridis(2)[1]), pch = 20)
+abline(h = 4.490801, col = "blue", lty = 4)
+legend("topleft", legend = c("OR > 1", "OR < 1"), fill = c("red", viridis::viridis(2)[1]), bty = "n")
+fig_label("b")
+dev.off()}
+
+write_xlsx(scoary_results, "scoary results.xlsx")
+#statistical threshold
+-log10(0.05/1548)
+# = 4.490801
+(0.05/1287)
+
+#UNITIGS
+#load FASTLMM unitigs results without covariate file
+unitig_result_no_cov <- read.table("FAST_UNITIGS", header = TRUE)
+nrow(unitig_result_no_cov)
+
+unitig_result_no_cov$log2FoldChange <- log2(unitig_result_no_cov$OddsRatio)
+unitig_result_no_cov$log10_pvalue <- -log10(unitig_result_no_cov$Pvalue)
+
+#load FASTLMM unitigs result with covariate file
+unitig_result_cov <- read.table("FAST_UNITIGS_COV", header = TRUE)
+nrow(unitig_result_cov)
+unitig_result_cov$Qvalue <- p.adjust(unitig_result_cov$Pvalue, method = "bonferroni")
+
+unitig_result_cov$log2FoldChange <- log2(unitig_result_cov$OddsRatio)
+unitig_result_cov$log10_pvalue <- -log10(unitig_result_cov$Pvalue)
+
+{pdf("unitig_combined", width = 8, height = 4)
+par(mfrow=c(1,2))
+qq(unitig_result_cov$Pvalue, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch =1, bty = "n", ylim = c(0, 6))
+fig_label("a")
+plot(unitig_result_cov$log2FoldChange, unitig_result_cov$log10_pvalue, xlab = expression(Log[2](odds~ratio)), ylab = expression(-Log[10]~(italic(p)~value)), las = 1, xlim = c(-0.4, 0.4), ylim = c(0, 7), bty = "n", col = ifelse(unitig_result_cov$OddsRatio>1, "red", viridis::viridis(2)[1]), pch = 20)
+abline(h = 5.397905, col = "blue", lty = 4)
+legend("topleft", legend = c("OR > 1", "OR < 1"), fill = c("red", viridis::viridis(2)[1]), bty = "n")
+fig_label("b")
+dev.off()}
+
+{pdf("test", width = 8, height = 4)
+  par(mfrow=c(1,2))
+  qq(unitig_result_cov$Pvalue, cex = 0.8, cex.axis = 0.8, cex.lab = 0.8, pch =1)
+  fig_label("a")
+  plot(unitig_result_cov$log2FoldChange, unitig_result_cov$log10_pvalue, xlab = expression(Log[2](odds~ratio)), ylab = expression(-Log[10]~(italic(p)~value)), las = 1, xlim = c(-0.4, 0.4), ylim = c(0, 7), bty = "n", col = ifelse(unitig_result_cov$OddsRatio>1, "red", viridis::viridis(2)[1]), pch = 20)
+  abline(h = 5.397905, col = "blue", lty = 4)
+  legend("topleft", legend = c("OR > 1", "OR < 1"), fill = c("red", viridis::viridis(2)[1]), bty = "n")
+  fig_label("b")
+  plot(1778005,0,las=1,xlim=c(0,1778005),ylim=c(0,max.p+1),#ylim=c(0,max(blast.kmers$log.p.value)+4 ),
+       bty="n",xaxt="n",yaxt="n",xaxs="i",yaxs="i",
+       xlab="Chromosome position",ylab=expression("-log"[10]~"("~italic("P")~"-value"~")"),col=rgb(0,0,0,alpha=0))
+  #legend("left",legend="Meningitis\n(Unitigs)",border=0,bg=rgb(1,1,1,alpha=0),lwd=0,bty="n",col=rgb(1,1,1,alpha=0),fillrgb(1,1,1,alpha=0))
+  axis(side = 2, at = c(seq(0,max.p+1,floor((max.p+1)/4) ),floor(max.p+1)),las=1)
+  axis(1,at=c(0,500000,1000000,1500000,2000000),
+       labels=c(0,expression("0.5\u00D710"^06),
+                expression("1.0\u00D710"^06),
+                expression("1.5\u00D710"^06),
+                expression("2.0\u00D710"^06)))
+  #rect(1193391,0,1209001,max(blast.kmers$log.p.value)+4,lwd=0,border=0,
+  #col=rgb((col2rgb("grey")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.755) )
+  segments(x0=blast.kmers$s_start,y0=blast.kmers$log.p.value,x1=blast.kmers$s_end,y1=blast.kmers$log.p.value,
+           col=ifelse(blast.kmers$OddsRatio<1,viridis::viridis(2)[1],"red"[1]),
+           lty=1,lwd=ifelse(blast.kmers$adj.p.value<0.05,2.11,2.10) )
+  #segments(0, threshold1, 2231314, threshold1,"blue",lty=2,lwd=1.5)
+  segments(0, threshold2, 1778005, threshold2,col="blue",lty=4,lwd=1.5)
+  #polygon(c(i-x.adj,i-x.adj,i+x.adj+xx.adj,i+x.adj+xx.adj),rev(c(0,1,1,0)),border=0,
+  #    col=rgb((col2rgb("grepolyy")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.25))
+  #text( 1209001+25000,max(blast.kmers$log.p.value)*0.75,labels=expression(italic("cps")~"locus"),
+  #srt=90,adj=0)
+  legend("topleft",pch=20,legend=c("OR <1","OR >1"),col=c(viridis::viridis(2)[1],"red"),bty="n",border=rgb(1,1,1,alpha=0))
+  fig_label("c")
+  dev.off()}
+
+#statistical threshold: 
+-log10(0.05/12499)
+(0.5/12499)
+
+#make a map for the location of the isolates
+library(maps)
+library(ggplot2)
+
+world <- map_data('world')
+
+
+map <- ggplot(world, aes(long, lat)) +
+  geom_map(map=world, aes(map_id=region,fill="#A6CEE3"), color="white", size=0.1) +
+  coord_quickmap() + theme_classic() +
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+  theme(axis.line = element_blank(), axis.text = element_blank(),
+        axis.ticks = element_blank(), legend.position = "none") +
+  geom_point(aes(x = 25.7482, y = 61.9241), colour = "red") +
+  scale_fill_viridis(discrete = TRUE)
+
+ggsave(file="map.pdf",width=8,height=4)
+
+sig_unitigs <- unitig_result_cov[unitig_result_cov$Qvalue<0.05, ]
+write.table(sig_unitigs, "sigunitigs.txt", row.names = FALSE, sep = "\t")
+
+
+
+#unitigs annotation 
+blast.kmers<-data.table::fread("blast_unitigs_annotate")
+colnames(blast.kmers)<-c("query_id",
+                         "subject_id",
+                         "pct_identity",
+                         "aln_length",
+                         "n_of_mismatches",
+                         "gap_openings",
+                         "q_start",
+                         "q_end",
+                         "s_start",
+                         "s_end",
+                         "e_value",
+                         "bit_score")
+max.p <- max(unitig_result_cov$log10_pvalue)
+blast.kmers$query_id
+blast.kmers<-dplyr::inner_join(blast.kmers, unitig_result_cov,by=c("query_id"="SNP"))
+blast.kmers$log.p.value<--log10(blast.kmers$Pvalue)
+blast.kmers$adj.p.value<-p.adjust(blast.kmers$Pvalue,method="bonferroni")
+
+pdf("unitig_manhattan", width = 8, height = 4)
+
+{
+  threshold1<--log10(1/length(blast.kmers$KmerID))
+  threshold2<--log10(0.05/length(blast.kmers$KmerID))
+  plot(1778005,0,las=1,xlim=c(0,1778005),ylim=c(0,max.p+1),#ylim=c(0,max(blast.kmers$log.p.value)+4 ),
+       bty="n",xaxt="n",yaxt="n",xaxs="i",yaxs="i",
+       xlab="Chromosome position",ylab=expression("-log"[10]~"("~italic("P")~"-value"~")"),col=rgb(0,0,0,alpha=0))
+  #legend("left",legend="Meningitis\n(Unitigs)",border=0,bg=rgb(1,1,1,alpha=0),lwd=0,bty="n",col=rgb(1,1,1,alpha=0),fillrgb(1,1,1,alpha=0))
+  axis(side = 2, at = c(seq(0,max.p+1,floor((max.p+1)/4) ),floor(max.p+1)),las=1)
+  axis(1,at=c(0,500000,1000000,1500000,2000000),
+       labels=c(0,expression("0.5\u00D710"^06),
+                expression("1.0\u00D710"^06),
+                expression("1.5\u00D710"^06),
+                expression("2.0\u00D710"^06)))
+  #rect(1193391,0,1209001,max(blast.kmers$log.p.value)+4,lwd=0,border=0,
+       #col=rgb((col2rgb("grey")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.755) )
+  segments(x0=blast.kmers$s_start,y0=blast.kmers$log.p.value,x1=blast.kmers$s_end,y1=blast.kmers$log.p.value,
+           col=ifelse(blast.kmers$OddsRatio<1,viridis::viridis(2)[1],"red"[1]),
+           lty=1,lwd=ifelse(blast.kmers$adj.p.value<0.05,2.11,2.10) )
+  #segments(0, threshold1, 2231314, threshold1,"blue",lty=2,lwd=1.5)
+  segments(0, threshold2, 1778005, threshold2,col="blue",lty=4,lwd=1.5)
+  #polygon(c(i-x.adj,i-x.adj,i+x.adj+xx.adj,i+x.adj+xx.adj),rev(c(0,1,1,0)),border=0,
+  #    col=rgb((col2rgb("grepolyy")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.25))
+  #text( 1209001+25000,max(blast.kmers$log.p.value)*0.75,labels=expression(italic("cps")~"locus"),
+        #srt=90,adj=0)
+  legend("right",pch=20,legend=c("OR <1","OR >1"),col=c(viridis::viridis(2)[1],"red"),bty="n",border=rgb(1,1,1,alpha=0))
+  abline(h = 5.397905, col = "blue", lty = 4)
+}
+abline(h = 3.961895, col = "blue", lty = 4)
+par(mfrow=c(1,1))
+
+#in order to make column names same for the code above to make graph
+scoary_results$SNP<-scoary_results$Gene
+scoary_results$Pvalue<-scoary_results$Naive_p
+
+
+{
+  par(mfrow = c(1,1))
+  plot(1778005,0,las=1,xlim=c(0,1778005),ylim=c(0,max.p+1),#ylim=c(0,max(blast.kmers$log.p.value)+4 ),
+       bty="n",xaxt="n",yaxt="n",xaxs="i",yaxs="i",
+       xlab="Chromosome position",ylab=expression("-log"[10]~"("~italic("P")~"-value"~")"),col=rgb(0,0,0,alpha=0))
+  #legend("left",legend="Meningitis\n(Unitigs)",border=0,bg=rgb(1,1,1,alpha=0),lwd=0,bty="n",col=rgb(1,1,1,alpha=0),fillrgb(1,1,1,alpha=0))
+  axis(side = 2, at = c(seq(0,max.p+1,floor((max.p+1)/4) ),floor(max.p+1)),las=1)
+  axis(1,at=c(0,500000,1000000,1500000,2000000),
+       labels=c(0,expression("0.5\u00D710"^06),
+                expression("1.0\u00D710"^06),
+                expression("1.5\u00D710"^06),
+                expression("2.0\u00D710"^06)))
+  #rect(1193391,0,1209001,max(blast.kmers$log.p.value)+4,lwd=0,border=0,
+  #col=rgb((col2rgb("grey")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.755) )
+  segments(x0=blast.kmers$s_start,y0=blast.kmers$log.p.value,x1=blast.kmers$s_end,y1=blast.kmers$log.p.value,
+           col=ifelse(blast.kmers$OddsRatio<1,viridis::viridis(2)[1],"red"[1]),
+           lty=1,lwd=ifelse(blast.kmers$adj.p.value<0.05,2.11,2.10) )
+  #segments(0, threshold1, 2231314, threshold1,"blue",lty=2,lwd=1.5)
+  segments(0, threshold2, 1778005, threshold2,col="blue",lty=4,lwd=1.5)
+  #polygon(c(i-x.adj,i-x.adj,i+x.adj+xx.adj,i+x.adj+xx.adj),rev(c(0,1,1,0)),border=0,
+  #    col=rgb((col2rgb("grepolyy")/255)[1],(col2rgb("lightblue")/255)[2],(col2rgb("lightblue")/255)[3],alpha=0.25))
+  #text( 1209001+25000,max(blast.kmers$log.p.value)*0.75,labels=expression(italic("cps")~"locus"),
+  #srt=90,adj=0)
+  legend("topleft",pch=20,legend=c("OR <1","OR >1"),col=c(viridis::viridis(2)[1],"red"),bty="n",border=rgb(1,1,1,alpha=0))
+  dev.off()
+  }
