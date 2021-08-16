@@ -1,0 +1,44 @@
+installed.packages("devtools")
+devtools::install_github("gtonkinhill/fastbaps")
+
+library(fastbaps)
+library(ggplot2)
+library(ape)
+library(maps)
+library(phytools)
+library(dplyr)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("ggtree")
+
+library(ggtree)
+#issues with ggtree, looked online and this was the solution - issues with tidytree:
+remotes::install_github("YuLab-SMU/tidytree")
+require(devtools)
+install_version("dplyr", version = "1.0.5", repos = "http://cran.us.r-project.org")
+
+
+fasta_alignment <- "snp_sites_gas.snp_sites.aln"
+sparse.data <- import_fasta_sparse_nt(fasta_alignment)
+sparse.data <- optimise_prior(sparse.data, type = "baps")
+baps.hc <- fast_baps(sparse.data)
+best.partition <- best_baps_partition(sparse.data, baps.hc)
+baps <- data.frame(best.partition)
+
+newick.file.name <- "tree_file"
+iqtree <- phytools::read.newick(newick.file.name)
+plot.df <- data.frame(id = colnames(sparse.data$snp.matrix), fastbaps = best.partition, stringsAsFactors = FALSE)
+
+gg <- ggtree(iqtree)
+f2 <- facet_plot(gg, panel = "fastbaps", data = plot.df, geom = geom_tile, aes(x = fastbaps), colour = "blue")
+f2
+
+#investigate multiple levels 
+sparse.data2 <- import_fasta_sparse_nt("snp_sites_gas.snp_sites.aln")
+multi <- multi_res_baps(sparse.data2)
+plot.df2 <- data.frame(id = colnames(sparse.data2$snp.matrix), fastbaps = multi$`Level 1`, fastbaps2 = multi$`Level 2`, stringsAsFactors = FALSE)
+gg2 <- ggtree(iqtree)
+f3 <- facet_plot(gg2, panel = "fastbaps level 1", data = plot.df2, geom = geom_tile, aes(x = fastbaps), colour = "blue")
+f3 <- facet_plot(f3, panel = "fastbaps level 2", data = plot.df2, geom = geom_tile, aes(x = fastbaps2), colour = "green")
+f3
