@@ -1,0 +1,119 @@
+install.packages("writexl")
+library(writexl)
+library(RColorBrewer)
+library(ggpubr)
+install.packages("egg")
+library("egg")
+install.packages("viridis")
+library(viridis)
+library(ggplot2)
+
+mlstoutput <- read.csv(file = 'mlst.csv', header = FALSE)
+head(mlstoutput)
+colnames(mlstoutput)
+names(mlstoutput) [names(mlstoutput) == "V1"] <- "File"
+names(mlstoutput) [names(mlstoutput) == "V2"] <- "Scheme"
+names(mlstoutput) [names(mlstoutput) == "V3"] <- "ST"
+write_xlsx(mlstoutput, "/Users/robyn/Documents/Masters/Research-Project\\mlstresults.xlsx")
+
+#remove problematic sample ID
+mlstoutput <- mlstoutput[-c(992),]
+table(mlstoutput$ST)
+#so no sequence type = 68 samples, sequence type 28 = 931 samples
+#replace - with "missing sequence data"
+new_meta$mlst_new <- gsub("-","Missing data", new_meta$mlst)
+
+#pie chart of mlst output
+mlst_bar <- ggplot(new_meta, aes(x= "", y= "", fill = factor(mlst_new))) + 
+  geom_bar (width =1, stat = "identity") +
+  guides(fill = guide_legend(title = "Sequence type")) +
+  theme_bw() +
+  theme(panel.border = element_blank()) +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank()) +
+  scale_fill_viridis(discrete = TRUE)
+mlst_pie <- mlst_bar + coord_polar("y", start = 0)
+mlst_pie
+
+#read in emm typing results - table dleimited file so use read.delim
+emm_output <- read.delim("emm_results.tab", header = TRUE, sep = "\t", na.strings = c(""))
+#remove problematic sample ID
+emm_output <- emm_output[-c(992),]
+table(emm_output$emm.type)
+#replace EMM strings and group emm types
+emm_output$EMMtype <- gsub("EMM","", emm_output$emm.type)
+emm_output$emm.grouped <- replace(emm_output$EMMtype, emm_output$EMMtype>1.01, "Other")
+write_xlsx(emm_output, "/Users/robyn/Documents/Masters/Research-Project\\emmresults.xlsx")
+write_xlsx(new_meta, "new_meta.xlsx")
+
+#create pie chart of emm outputs
+
+new_meta$emm_type <- sub("^$", "Other", new_meta$emm_type)
+emm_bar <- ggplot(new_meta, aes(x= "", y= "", fill = factor(emm_type))) + 
+  geom_bar (width =1, stat = "identity") +
+  guides(fill = guide_legend(title = expression(italic(emm)~type))) +
+  theme_bw() +
+  theme(panel.border = element_blank()) +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank()) +
+  scale_fill_viridis(discrete = TRUE)
+emm_pie <- emm_bar + coord_polar("y", start = 0)
+emm_pie
+
+ggsave("combined.pdf", width = 8, height = 4)
+
+#year of isolation
+table(new_meta$Year)
+#pie chart of year of isolation 
+metadata <- read.table(file = "Metadata.GAS.txt", sep = "\t", header = TRUE)
+#extract columns
+new_meta <- metadata[,names(metadata) %in% c("emm_type","mlst","Year")]
+new_meta <- new_meta[!is.na(new_meta$Year),]
+
+#group year of isolation into categorical variables
+new_meta$Year_grouped <- cut(new_meta$Year,
+                             breaks = c(-Inf, 1993, 1999, 2005, Inf),
+                             labels = c("1988-1993", "1994-1999", "2000-2005", "2006-2011"))
+
+year_bar <- ggplot(new_meta, aes(x= "", y= "", fill = factor(Year_grouped))) + 
+  geom_bar (width =1, stat = "identity") +
+  guides(fill = guide_legend(title = "Year of isolation")) +
+  theme_bw() +
+  theme(panel.border = element_blank()) +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank()) +
+  scale_fill_viridis(discrete = TRUE)
+year_pie <- year_bar + coord_polar("y", start = 0)
+year_pie
+
+#merge year, emm type, sequence type images into 1 and save (year of is =a, ST = b, emm = c)
+ggarrange(year_pie, mlst_pie, emm_pie,
+          labels = c("a", "b", "c"),
+          ncol = 2, nrow = 2)
+ggsave("combined.pdf", width = 8, height = 4)
+
+#graph combining year of isolation and emm_type- stacked bar graph and relative bar graph
+new_meta_summary <- new_meta %>% 
+  group_by(Year_grouped, emm_type) %>%
+  summarise(n = n())
+
+isolation_year_plot <- ggplot(new_meta_summary, aes(fill = emm_type, y = n, x = Year_grouped)) +
+  geom_bar(position = "stack", stat = "identity") +
+  guides(fill = guide_legend(title = expression(italic(emm)~type))) +
+  xlab("Year of Isolation") + ylab("Number of samples") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_viridis(discrete = TRUE)
+isolation_year_plot
+
+isolation_year_stacked <- ggplot(new_meta_summary, aes(fill = emm_type, y = n, x = Year_grouped)) +
+  geom_bar(position = "fill", stat = "identity") + 
+  guides(fill = guide_legend(title = expression(italic(emm)~type))) +
+  xlab("Year of isolation") + ylab("Proportion") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_viridis(discrete = TRUE)
+isolation_year_stacked
+
+ggplot_build(mlst_bar)$data
+tiff("isolation and emm type stacked", width = 3000, height = 3000, res = 400) 
+isolation_year_stacked 
+dev.off()
