@@ -1,0 +1,77 @@
+
+library(ggsignif)
+library(viridis)
+library(ggplot2)
+
+virulence_blast <- as_tibble(read.csv("blast_output.Summary.txt", sep = "\t", header = TRUE))
+temp2 <- virulence_blast %>% gather(key="genes",value="presence", c(-Infection.status, -Sequence)) %>% 
+  select(-Sequence) %>% group_by(Infection.status, genes) %>%
+  mutate(N=n()) %>% group_by(Infection.status, genes, N) %>% 
+  summarise(sum_presence = sum(presence)) %>%
+  ungroup() %>%
+  select((-c(N))) %>%
+  spread(key = Infection.status, value = sum_presence, fill = 0)
+
+temp1 <- virulence_blast %>% gather(key="genes",value="presence", c(-Infection.status, -Sequence)) %>% 
+  select(-Sequence) %>% group_by(Infection.status, genes) %>%
+  mutate(N=n()) %>% group_by(Infection.status, genes, N) %>% 
+  summarise(sum_presence = sum(presence)) %>%
+  ungroup() %>%
+  select(-c(sum_presence)) %>%
+  spread(key = Infection.status, value = N, fill = 0)
+#%>%
+#filter(Infection.status == "Phr")
+
+final_df <- temp1 %>% full_join(temp2, by = "genes")
+colnames(final_df) <- c("genes", "Inv", "Phr", "Inv_gene", "Phr_gene")
+
+prop.test(c(final_df$Inv_gene[1], final_df$Phr_gene[1]), c(final_df$Inv[1], final_df$Phr[1]))
+chi_test <- prop.test(c(final_df$Inv_gene[3], final_df$Phr_gene[3]), c(final_df$Inv[3], final_df$Phr[3]))
+chi_test$p.value
+chi_test$estimate[1]
+chi_test$estimate[2]
+chi_test <- final_df %>% rowwise() %>% 
+  mutate(p.value = prop.test(c(Inv_gene, Phr_gene), c(Inv, Phr))$p.value,
+         prop_Inv = prop.test(c(Inv_gene, Phr_gene), c(Inv, Phr))$estimate[1],
+         prop_Phr = prop.test(c(Inv_gene, Phr_gene), c(Inv, Phr))$estimate[2]) %>%
+  mutate(p.value = ifelse(is.na(p.value), 1, p.value)) 
+chi_test$q.value <- p.adjust(chi_test$p.value, method = "bonferroni")
+
+#only 40 genes so can use un-adjusted p values 
+graph_data <- chi_test %>% select(genes, prop_Inv, prop_Phr, p.value) %>%
+  gather(key = "Infection_status", value = "Proportion", -c(genes, p.value))
+
+write_xlsx(graph_data, "graph_data.xlsx")
+new_graphdata <- read.csv("graph_data.txt", sep = "\t", header = TRUE)
+
+vf_names <- list(
+  "Toxin" = "Toxin",
+  "Exoenzyme" = "Exoenzyme",
+  "Adherence" = "Adherence",
+  "Antiproteolysis" = "Anti proteolysis",
+  "Immune_evasion" = "Immune evasion",
+  "Plasminogen_activator" = "Plasminogen activator", 
+  "antiphagocytosis" = "Antiphagocytosis"
+)
+vf_names
+
+vf_labeller <- function(variable, value){
+  return(vf_names[value])
+}
+
+ggplot(new_graphdata, aes(x = genes, y = Proportion, fill = Infection_status, 
+                          label = ifelse(p.value < 0.05, "*", ""))) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  xlab("Gene") +
+  ylab("Proportion") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, size = 10)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(axis.line = element_line(colour = "black")) +
+  scale_fill_viridis(discrete = TRUE, labels = c("Invasive", "Pharyngitis")) +
+  guides(fill = guide_legend(title ="Infection status")) +
+  facet_grid(cols = vars(gene_groups), scales = "free", space = "free") +
+  theme(strip.text.x = element_text(angle = 90)) +
+  theme(strip.background = element_blank()) +
+  theme(panel.border = element_rect(colour = "black", fill =NA)) +
+  geom_text(vjust = 0)
